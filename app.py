@@ -160,7 +160,7 @@ left, right = st.columns([1,2])
 with left:
     ceps_input = st.text_area(
         "Insira CEPs separados por vírgula:",
-        placeholder="Ex: 02847020,01407-200,00000000",
+        placeholder="Ex: 00000-000 ou 00000000",
         height=80
     )
     if st.button("📍 Adicionar Marcadores", use_container_width=True):
