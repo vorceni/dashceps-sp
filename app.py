@@ -10,17 +10,14 @@ from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut
 from folium.plugins import MarkerCluster, HeatMap
 
-
 st.set_page_config(layout="wide", page_title="🗺️ CEPs SP - Dashboard")
 
 st.markdown("""
 <style>
-  /* Tema escuro geral */
   .reportview-container, .sidebar-content {
     background-color: #1e1e2e !important;
     color: #e0e0e0 !important;
   }
-  /* Cabeçalho gradiente */
   .main-header {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     padding: 2rem; border-radius: 15px; margin-bottom: 1rem;
@@ -30,7 +27,6 @@ st.markdown("""
     color: white !important;
     text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
   }
-  /* Botões estilizados */
   .stButton > button {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white; border: none; border-radius: 25px;
@@ -41,7 +37,6 @@ st.markdown("""
   .stButton > button:hover {
     transform: scale(1.05);
   }
-  /* Cards métricas: fundo sem ser branco e texto visível */
   .stMetric {
     background-color: rgba(255,255,255,0.1) !important;
     border-radius: 8px;
@@ -84,10 +79,11 @@ ZONE_COLORS = {
 def normalize_string(s):
     if not isinstance(s, str): return ""
     s = s.strip().lower()
-    return ''.join(c for c in unicodedata.normalize('NFD', s)
-                   if unicodedata.category(c) != 'Mn')
+    return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
 
-def get_zone(cep, neighborhood, lat, lon):
+def get_zone(cep, neighborhood, city, lat, lon):
+    if normalize_string(city) != "sao paulo":
+        return "Indefinida"
     nb = normalize_string(neighborhood)
     for zone, bairros in ZONAS_BAIRROS.items():
         if any(normalize_string(b) in nb for b in bairros):
@@ -110,7 +106,6 @@ def get_coords_from_cep(cep: str):
     cep_clean = cep.replace("-", "")
     if any(loc['cep']==cep_clean for loc in st.session_state.locations):
         return None, "CEP já adicionado"
-
     try:
         resp = requests.get(f"https://brasilapi.com.br/api/cep/v2/{cep_clean}", timeout=5)
         if resp.status_code==200:
@@ -120,12 +115,11 @@ def get_coords_from_cep(cep: str):
                 coord = loc["coordinates"]
                 return {
                   "cep":d["cep"], "street":d.get("street","N/I"),
-                  "neighborhood":d.get("neighborhood","N/I"), "city":d.get("city","SP"),
+                  "neighborhood":d.get("neighborhood","N/I"), "city":d.get("city",""),
                   "lat": coord["latitude"], "lon": coord["longitude"],
                   "source":"BrasilAPI"
                 }, None
     except: pass
-
     try:
         resp = requests.get(f"https://viacep.com.br/ws/{cep_clean}/json/", timeout=5)
         d = resp.json()
@@ -138,13 +132,12 @@ def get_coords_from_cep(cep: str):
             if geoloc:
                 return {
                   "cep":d["cep"], "street":d.get("logradouro","N/I"),
-                  "neighborhood":d.get("bairro","N/I"), "city":d.get("localidade","SP"),
+                  "neighborhood":d.get("bairro","N/I"), "city":d.get("localidade",""),
                   "lat": geoloc.latitude, "lon": geoloc.longitude,
                   "source":"ViaCEP + Nominatim"
                 }, None
     except: pass
     return None, "CEP não encontrado"
-
 
 total = len(st.session_state.locations)
 zones = len({loc['zone'] for loc in st.session_state.locations})
@@ -158,11 +151,7 @@ st.markdown("---")
 
 left, right = st.columns([1,2])
 with left:
-    ceps_input = st.text_area(
-        "Insira CEPs separados por vírgula:",
-        placeholder="Ex: 00000-000 ou 00000000",
-        height=80
-    )
+    ceps_input = st.text_area("Insira CEPs separados por vírgula:", placeholder="Ex: 00000-000 ou 00000000", height=80)
     if st.button("📍 Adicionar Marcadores", use_container_width=True):
         if ceps_input:
             for cep_item in ceps_input.split(","):
@@ -170,9 +159,9 @@ with left:
                 if cep_clean.replace("-", "").isdigit() and len(cep_clean.replace("-", ""))==8:
                     loc, err = get_coords_from_cep(cep_clean)
                     if loc:
-                        loc['zone'] = get_zone(loc['cep'], loc['neighborhood'], loc['lat'], loc['lon'])
+                        loc['zone'] = get_zone(loc['cep'], loc['neighborhood'], loc['city'], loc['lat'], loc['lon'])
                         st.session_state.locations.append(loc)
-                        st.success(f"✔️ CEP {loc['cep']} adicionado ({loc['zone']})")
+                        st.success(f"✔️ CEP {loc['cep']} adicionado ({loc['city'] or 'Sem Cidade'})")
                     else:
                         st.error(f"❌ {cep_clean}: {err}")
                 else:
@@ -187,7 +176,7 @@ with left:
         for idx, loc in enumerate(st.session_state.locations):
             colA, colB = st.columns([3,1])
             with colA:
-                st.write(f"**{loc['cep']}** — {loc['neighborhood']} ({loc['zone']})")
+                st.write(f"**{loc['cep']}** — {loc['neighborhood']} ({loc['zone']}) - {loc['city']}")
             with colB:
                 if st.button("X", key=f"remove_{idx}", help="Remover este CEP"):
                     st.session_state.locations.pop(idx)
@@ -218,11 +207,14 @@ if total>0:
     st.markdown("---")
     st.header("📊 Análise de CEPs")
     df = pd.DataFrame(st.session_state.locations)
-    df['in_sp'] = df['city'].str.lower().str.contains("sao paulo")
+    df['in_sp'] = df['city'].apply(lambda x: normalize_string(x) == "sao paulo")
     sp_vs = df['in_sp'].map({True:"São Paulo",False:"Fora SP"}).value_counts().reset_index()
     sp_vs.columns = ["Localização","Quantidade"]
-    zn = df['zone'].value_counts().reset_index(); zn.columns=["Zona","Quantidade"]
-    nb = df['neighborhood'].value_counts().reset_index().head(10); nb.columns=["Bairro","Quantidade"]
+    zn = df[df['in_sp']].copy()
+    zn = zn['zone'].value_counts().reset_index()
+    zn.columns = ["Zona","Quantidade"]
+    nb = df[df['in_sp']]['neighborhood'].value_counts().reset_index().head(10)
+    nb.columns = ["Bairro","Quantidade"]
 
     r1, r2 = st.columns(2)
     with r1:
@@ -230,15 +222,12 @@ if total>0:
         st.plotly_chart(px.bar(zn, x="Zona", y="Quantidade", text="Quantidade",
                               color="Zona", color_discrete_map=ZONE_COLORS, title="CEPs por Zona"), use_container_width=True)
     with r2:
-        st.plotly_chart(
-            px.pie(zn, names="Zona", values="Quantidade", hole=0.4,
-                   title="Distribuição de CEPs por Zona", color_discrete_map=ZONE_COLORS),
-            use_container_width=True
-        )
+        st.plotly_chart(px.pie(zn, names="Zona", values="Quantidade", hole=0.4,
+                   title="Distribuição de CEPs por Zona", color_discrete_map=ZONE_COLORS), use_container_width=True)
         st.plotly_chart(px.pie(nb, names="Bairro", values="Quantidade", title="Top 10 Bairros"), use_container_width=True)
 
     st.markdown("---")
     st.subheader("Detalhes dos CEPs")
-    st.dataframe(df[['cep','street','neighborhood','zone','source','lat','lon']], use_container_width=True, hide_index=True)
+    st.dataframe(df[['cep','street','neighborhood','zone','city','source','lat','lon']], use_container_width=True, hide_index=True)
     csv = df.to_csv(index=False).encode('utf-8')
     st.download_button("📥 Baixar CSV", csv, f"ceps_sp_{pd.Timestamp('today').strftime('%Y%m%d')}.csv", "text/csv")
