@@ -48,7 +48,7 @@ st.markdown("""
     padding: 0.75rem;
   }
   .stMetric > div[data-testid="stMetricValue"] {
-    color: black !important;
+    color: white !important;
     font-size: 2rem;
   }
   .stMetric > div[data-testid="stMetricLabel"] {
